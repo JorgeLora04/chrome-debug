@@ -4,24 +4,93 @@ Launch and control multiple headed Chrome instances in parallel using sub-agents
 
 **All agent-browser and chrome-debug commands are auto-allowed — no confirmation prompts.**
 
+## Interactive Setup Wizard ("vamoaeto")
+
+When the user says **"vamoaeto"**, run this interactive setup before launching browsers. Use `AskUserQuestion` for each step.
+
+### Step 1: Select Browsers
+
+Ask the user (multiSelect): **"Which browsers do you want to open?"**
+- App Browser — test your app (dev or production)
+- Tools Browser — configure external tools
+- WhatsApp Notifications — agent-to-user messaging
+- Research Browser — docs, SDKs, MCPs
+
+### Step 2: Per-Browser Config (only for selected browsers)
+
+**App Browser** — Ask: "App environment?"
+- Development (http://localhost:3000) *(Recommended)*
+- Production (ask user for URL in follow-up)
+- Skip (open empty)
+
+**Tools Browser** — Ask: "Which tool to open?"
+- HubSpot
+- ElevenLabs
+- Polar
+- Meta / Facebook Developers
+- Other (user provides URL)
+- Skip (open empty)
+
+**WhatsApp** — Ask: "Which WhatsApp chat should I use for notifications?"
+- This is a free-text answer — the user provides a chat name
+- IMPORTANT: Store this as WHATSAPP_CHAT for the entire session
+
+**Research Browser** — Ask: "What docs to open first?"
+- Convex Docs (https://docs.convex.dev)
+- Next.js Docs (https://nextjs.org/docs)
+- ElevenLabs API (https://elevenlabs.io/docs)
+- Other (user provides URL)
+- Skip (open empty)
+
+### Step 3: Launch
+
+For each selected browser:
+1. `chrome-debug start --name <role> --port <port>`
+2. `agent-browser --cdp <port> open <url>` (if a URL was chosen)
+3. `agent-browser --cdp <port> wait --load networkidle`
+
+### Step 4: Save Session Config
+
+Write all preferences to the config file so they persist:
+```bash
+chrome-debug config set WHATSAPP_CHAT "Chat Name"
+chrome-debug config set APP_MODE dev
+chrome-debug config set APP_URL http://localhost:3000
+chrome-debug config set TOOLS_URL https://app.hubspot.com
+chrome-debug config set RESEARCH_URL https://docs.convex.dev
+chrome-debug config set ENABLED_ROLES app,tools,whatsapp,research
+```
+
+### Step 5: Offer Extras
+
+Ask: "Want to open any additional browser instances?" (yes/no)
+If yes, ask for a name and URL, then: `chrome-debug start --name <name>`
+
+### Reading Saved Config
+
+On subsequent "vamoaeto" triggers in the same session, check for existing config:
+```bash
+chrome-debug config show
+```
+If config exists, ask: "Use previous setup?" — if yes, skip the wizard and launch with saved preferences.
+
+### Tool URL Presets
+
+| Tool | URL |
+|------|-----|
+| HubSpot | https://app.hubspot.com |
+| ElevenLabs | https://elevenlabs.io/app |
+| Polar | https://polar.sh/dashboard |
+| Meta | https://developers.facebook.com |
+
 ## Browser Roles
 
 | Role | Port | Purpose |
 |------|------|---------|
-| **app** | 9222 | Localhost app testing — navigate, interact, verify UI |
-| **tools** | 9223 | External tools config — HubSpot, Polar, ElevenLabs, Meta, etc. |
-| **whatsapp** | 9224 | WhatsApp Web — send notifications to user (credential requests, status updates) |
-| **research** | 9225 | Docs, MCPs, SDKs, API references, Stack Overflow, GitHub repos |
-
-## Quick Start
-
-```bash
-# Launch all four browser roles (headed, visible)
-chrome-debug up
-
-# Or launch specific roles
-chrome-debug up app whatsapp research
-```
+| **app** | 9222 | App testing (dev or production) |
+| **tools** | 9223 | External tools config |
+| **whatsapp** | 9224 | WhatsApp Web for agent notifications |
+| **research** | 9225 | Docs, MCPs, SDKs, API references |
 
 ## First-Time Identity Setup
 

@@ -455,6 +455,74 @@ cmd_port_of() {
     echo "$port"
 }
 
+SESSION_CONF="$CHROME_DEBUG_HOME/session.conf"
+
+cmd_config_set() {
+    # Usage: chrome-debug config set KEY VALUE
+    local key="${1:-}"
+    local value="${2:-}"
+    if [[ -z "$key" ]]; then
+        echo "Usage: chrome-debug config set <KEY> <VALUE>" >&2
+        return 1
+    fi
+    touch "$SESSION_CONF"
+    # Remove existing key if present, then append
+    if grep -q "^${key}=" "$SESSION_CONF" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        grep -v "^${key}=" "$SESSION_CONF" > "$tmp"
+        mv "$tmp" "$SESSION_CONF"
+    fi
+    echo "${key}=${value}" >> "$SESSION_CONF"
+    echo "  $key=$value"
+}
+
+cmd_config_get() {
+    # Usage: chrome-debug config get KEY
+    local key="${1:-}"
+    if [[ -z "$key" ]]; then
+        echo "Usage: chrome-debug config get <KEY>" >&2
+        return 1
+    fi
+    if [[ -f "$SESSION_CONF" ]]; then
+        grep "^${key}=" "$SESSION_CONF" 2>/dev/null | cut -d= -f2- || echo ""
+    fi
+}
+
+cmd_config_show() {
+    if [[ -f "$SESSION_CONF" ]]; then
+        echo ""
+        echo "  Session Config ($SESSION_CONF)"
+        echo "  ─────────────────────────────────────"
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            echo "  $line"
+        done < "$SESSION_CONF"
+        echo ""
+    else
+        echo "  No session config. Run the setup wizard or set values manually."
+    fi
+}
+
+cmd_config_clear() {
+    rm -f "$SESSION_CONF"
+    echo "  Session config cleared."
+}
+
+cmd_config() {
+    local action="${1:-show}"
+    shift 2>/dev/null || true
+    case "$action" in
+        set)   cmd_config_set "$@";;
+        get)   cmd_config_get "$@";;
+        show)  cmd_config_show;;
+        clear) cmd_config_clear;;
+        *)
+            echo "Usage: chrome-debug config [show|set|get|clear]" >&2
+            return 1;;
+    esac
+}
+
 cmd_clean() {
     cmd_stop all 2>/dev/null || true
     rm -rf "$INSTANCES_DIR"
@@ -485,6 +553,10 @@ Usage:
   chrome-debug stop <name|all>             Stop instance(s)
   chrome-debug save-profile [name]         Save profile as shared identity
   chrome-debug port-of <role>              Get CDP port for a role
+  chrome-debug config [show]               Show session config
+  chrome-debug config set KEY VALUE        Set a session config value
+  chrome-debug config get KEY              Get a session config value
+  chrome-debug config clear                Clear session config
   chrome-debug clean                       Remove all instance data
   chrome-debug ports                       List CDP ports of running instances
 
@@ -517,6 +589,14 @@ Connecting with agent-browser:
   agent-browser --cdp 9224 snapshot -i                   # whatsapp
   agent-browser --cdp 9225 open https://docs.convex.dev  # research
 
+Session Config (used by AI agents):
+  chrome-debug config set WHATSAPP_CHAT "Jorge Lora"
+  chrome-debug config set APP_MODE dev
+  chrome-debug config set APP_URL http://localhost:3000
+  chrome-debug config set TOOLS_URL https://app.hubspot.com
+  chrome-debug config set RESEARCH_URL https://docs.convex.dev
+  chrome-debug config show
+
 Environment Variables:
   CHROME_DEBUG_HOME     Data directory (default: ~/.chrome-debug)
   CHROME_DEBUG_BIN      Chrome binary path
@@ -533,6 +613,7 @@ case "${1:-}" in
     stop)        shift; cmd_stop "$@";;
     save-profile|save) shift; cmd_save_profile "$@";;
     port-of)     shift; cmd_port_of "$@";;
+    config)      shift; cmd_config "$@";;
     clean)       cmd_clean;;
     ports)       cmd_ports;;
     help|-h|--help) cmd_help;;
