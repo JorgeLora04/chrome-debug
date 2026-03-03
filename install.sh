@@ -78,7 +78,7 @@ if [[ "$SKIP_ALIAS" != "1" && -n "$SHELL_RC" ]]; then
     fi
 
     if [[ -n "$ALIAS_NAME" ]]; then
-        ALIAS_LINE="alias $ALIAS_NAME='chrome-debug'"
+        ALIAS_LINE="alias $ALIAS_NAME='chrome-debug up'"
         if ! grep -qF "$ALIAS_LINE" "$SHELL_RC" 2>/dev/null; then
             echo "" >> "$SHELL_RC"
             echo "# chrome-debug alias" >> "$SHELL_RC"
