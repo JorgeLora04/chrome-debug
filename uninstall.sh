@@ -35,7 +35,7 @@ fi
 # Note about manual cleanup
 echo ""
 echo "  Manual cleanup (optional):"
-echo "    - Remove alias from ~/.zshrc or ~/.bashrc"
+echo "    - Remove alias from ~/.zshrc, ~/.bashrc, or ~/.bash_profile"
 echo "    - Remove 'Bash(agent-browser' and 'Bash(chrome-debug' from ~/.claude/settings.json"
 echo ""
 echo "  Uninstall complete."

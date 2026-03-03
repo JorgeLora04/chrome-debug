@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # chrome-debug installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/USER/chrome-debug/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/JorgeLora04/chrome-debug/main/install.sh | bash
 #
 # Options (via environment variables):
 #   ALIAS_NAME=vamoaeto  ./install.sh    # Set a custom shell alias
@@ -8,6 +8,13 @@
 #   SKIP_CLAUDE=1        ./install.sh    # Don't install Claude Code command or permissions
 
 set -euo pipefail
+
+# ─── OS Detection ─────────────────────────────────────────────────────────────
+case "$(uname -s)" in
+    Darwin)                OS_TYPE="macos";;
+    MINGW*|MSYS*|CYGWIN*) OS_TYPE="windows";;
+    *)                     OS_TYPE="linux";;
+esac
 
 REPO_URL="${CHROME_DEBUG_REPO_URL:-https://raw.githubusercontent.com/JorgeLora04/chrome-debug/main}"
 BIN_DIR="$HOME/.local/bin"
@@ -20,6 +27,7 @@ SKIP_CLAUDE="${SKIP_CLAUDE:-0}"
 echo ""
 echo "  chrome-debug installer"
 echo "  ──────────────────────"
+echo "  Platform: $OS_TYPE"
 echo ""
 
 # ─── 1. Install the script ───────────────────────────────────────────────────
@@ -44,6 +52,12 @@ elif [[ -f "$HOME/.bashrc" ]]; then
     SHELL_RC="$HOME/.bashrc"
 elif [[ -f "$HOME/.bash_profile" ]]; then
     SHELL_RC="$HOME/.bash_profile"
+fi
+
+# On Windows Git Bash, create .bashrc if no shell RC exists
+if [[ -z "$SHELL_RC" && "$OS_TYPE" == "windows" ]]; then
+    SHELL_RC="$HOME/.bashrc"
+    touch "$SHELL_RC"
 fi
 
 if [[ -n "$SHELL_RC" ]]; then
@@ -91,10 +105,18 @@ if [[ "$SKIP_CLAUDE" != "1" ]]; then
     PERMISSIONS_TO_ADD=(
         'Bash(agent-browser'
         'Bash(chrome-debug'
-        'Bash(export PATH="$HOME/.local/bin:$HOME/Library/pnpm:$PATH" && agent-browser'
-        'Bash(export PATH="$HOME/.local/bin:$HOME/Library/pnpm:$PATH" && chrome-debug'
+        'Bash(export PATH="$HOME/.local/bin:$PATH" && agent-browser'
+        'Bash(export PATH="$HOME/.local/bin:$PATH" && chrome-debug'
         'Bash(curl -s http://localhost'
     )
+
+    # On macOS, also add the Library/pnpm path variant
+    if [[ "$OS_TYPE" == "macos" ]]; then
+        PERMISSIONS_TO_ADD+=(
+            'Bash(export PATH="$HOME/.local/bin:$HOME/Library/pnpm:$PATH" && agent-browser'
+            'Bash(export PATH="$HOME/.local/bin:$HOME/Library/pnpm:$PATH" && chrome-debug'
+        )
+    fi
 
     if [[ -f "$CLAUDE_SETTINGS" ]]; then
         # Check if jq is available
@@ -134,19 +156,43 @@ fi
 # ─── 6. Check prerequisites ──────────────────────────────────────────────────
 echo ""
 
-# Check Chrome
-CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-if [[ ! -x "$CHROME_BIN" ]]; then
-    # Try Linux paths
-    for bin in google-chrome google-chrome-stable chromium chromium-browser; do
-        if command -v "$bin" &>/dev/null; then
-            CHROME_BIN="$bin"
-            break
+# Check Chrome (platform-specific)
+CHROME_FOUND=false
+case "$OS_TYPE" in
+    macos)
+        CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        if [[ -x "$CHROME_BIN" ]]; then
+            CHROME_FOUND=true
         fi
-    done
-fi
+        ;;
+    windows)
+        for candidate in \
+            "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+            "/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"; do
+            if [[ -f "$candidate" ]]; then
+                CHROME_FOUND=true
+                break
+            fi
+        done
+        # Also check via LOCALAPPDATA
+        if [[ "$CHROME_FOUND" == "false" && -n "${LOCALAPPDATA:-}" ]]; then
+            local_chrome="$(cygpath "$LOCALAPPDATA" 2>/dev/null)/Google/Chrome/Application/chrome.exe"
+            if [[ -f "$local_chrome" ]]; then
+                CHROME_FOUND=true
+            fi
+        fi
+        ;;
+    *)
+        for bin in google-chrome google-chrome-stable chromium chromium-browser; do
+            if command -v "$bin" &>/dev/null; then
+                CHROME_FOUND=true
+                break
+            fi
+        done
+        ;;
+esac
 
-if [[ -x "$CHROME_BIN" ]] || command -v "$CHROME_BIN" &>/dev/null 2>&1; then
+if $CHROME_FOUND; then
     echo "  [ok] Chrome found"
 else
     echo "  [!!] Chrome not found. Install Google Chrome or set CHROME_DEBUG_BIN"
@@ -156,7 +202,7 @@ fi
 if command -v agent-browser &>/dev/null; then
     echo "  [ok] agent-browser found ($(agent-browser --version 2>/dev/null || echo 'unknown version'))"
 else
-    echo "  [!!] agent-browser not installed. Run: npm install -g agent-browser && agent-browser install"
+    echo "  [!!] agent-browser not installed. Run: npm install -g @anthropic-ai/agent-browser && agent-browser install"
 fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
