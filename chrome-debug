@@ -1,0 +1,542 @@
+#!/usr/bin/env bash
+# chrome-debug - Manage Chrome debug instances for agent-browser
+#
+# Usage:
+#   chrome-debug [start] [options] [URL]     Launch a new Chrome debug instance
+#   chrome-debug list                        List running instances
+#   chrome-debug stop <name|all>             Stop instance(s)
+#   chrome-debug save-profile [name]         Save instance profile as base identity
+#   chrome-debug clean                       Remove all instance data
+#   chrome-debug ports                       Show CDP ports of running instances
+#   chrome-debug help                        Show this help
+#
+# Identity Sharing:
+#   All instances clone the base profile at launch, sharing cookies, localStorage,
+#   and login sessions. To set up identity:
+#     1. chrome-debug start --name setup
+#     2. Log into your sites in the browser window
+#     3. chrome-debug save-profile setup
+#     4. All future instances will start with that identity
+#
+# Connecting with agent-browser:
+#   agent-browser --cdp <port> snapshot -i
+#   agent-browser --cdp <port> --session <name> open <url>
+
+set -euo pipefail
+
+# ─── Configuration ────────────────────────────────────────────────────────────
+CHROME_DEBUG_HOME="${CHROME_DEBUG_HOME:-$HOME/.chrome-debug}"
+CHROME_BIN="${CHROME_DEBUG_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+BASE_PROFILE="$CHROME_DEBUG_HOME/base-profile"
+INSTANCES_DIR="$CHROME_DEBUG_HOME/instances"
+REGISTRY="$CHROME_DEBUG_HOME/registry"
+ROLES_FILE="$CHROME_DEBUG_HOME/roles.conf"
+BASE_PORT=9222
+
+mkdir -p "$INSTANCES_DIR" "$BASE_PROFILE" "$REGISTRY"
+
+# ─── Built-in Roles ──────────────────────────────────────────────────────────
+# Portable role lookup (bash 3.x compatible, no associative arrays)
+ALL_ROLES="app tools whatsapp research"
+
+_role_port() {
+    case "$1" in
+        app)      echo "9222";;
+        tools)    echo "9223";;
+        whatsapp) echo "9224";;
+        research) echo "9225";;
+        *)        echo "";;
+    esac
+}
+
+_role_url() {
+    case "$1" in
+        app)      echo "";;
+        tools)    echo "";;
+        whatsapp) echo "https://web.whatsapp.com";;
+        research) echo "";;
+        *)        echo "";;
+    esac
+}
+
+_role_size() {
+    case "$1" in
+        app)      echo "1280,900";;
+        tools)    echo "1280,900";;
+        whatsapp) echo "1280,900";;
+        research) echo "1400,900";;
+        *)        echo "1280,900";;
+    esac
+}
+
+_role_desc() {
+    case "$1" in
+        app)      echo "Localhost app testing";;
+        tools)    echo "External tools config (HubSpot, Polar, ElevenLabs, etc.)";;
+        whatsapp) echo "WhatsApp Web for agent notifications";;
+        research) echo "Docs, MCPs, SDKs, API references, Stack Overflow";;
+        *)        echo "";;
+    esac
+}
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+_is_running() {
+    kill -0 "$1" 2>/dev/null
+}
+
+_find_free_port() {
+    local port=$BASE_PORT
+    while lsof -i ":$port" &>/dev/null 2>&1; do
+        port=$((port + 1))
+    done
+    echo "$port"
+}
+
+_prune_registry() {
+    for f in "$REGISTRY"/*; do
+        [[ -f "$f" ]] || continue
+        local pid
+        pid=$(awk '{print $1}' "$f")
+        if ! _is_running "$pid"; then
+            rm -f "$f"
+        fi
+    done
+}
+
+_instance_count() {
+    _prune_registry
+    ls "$REGISTRY" 2>/dev/null | wc -l | tr -d ' '
+}
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_start() {
+    local name=""
+    local port=""
+    local headless=false
+    local url=""
+    local window_size="1280,900"
+    local window_position=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name|-n)       name="$2"; shift 2;;
+            --port|-p)       port="$2"; shift 2;;
+            --headless|-H)   headless=true; shift;;
+            --size|-s)       window_size="$2"; shift 2;;
+            --position)      window_position="$2"; shift 2;;
+            --help|-h)
+                echo "Usage: chrome-debug [start] [--name NAME] [--port PORT] [--headless] [--size WxH] [URL]"
+                return 0;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1;;
+            *)
+                url="$1"; shift;;
+        esac
+    done
+
+    # Verify Chrome exists
+    if [[ ! -x "$CHROME_BIN" ]]; then
+        echo "Error: Chrome not found at $CHROME_BIN" >&2
+        echo "Set CHROME_DEBUG_BIN to your Chrome path" >&2
+        return 1
+    fi
+
+    # Auto-name: browser-1, browser-2, etc.
+    if [[ -z "$name" ]]; then
+        local count
+        count=$(_instance_count)
+        name="browser-$((count + 1))"
+    fi
+
+    # Check if name is already in use
+    if [[ -f "$REGISTRY/$name" ]]; then
+        local existing_pid
+        existing_pid=$(awk '{print $1}' "$REGISTRY/$name")
+        if _is_running "$existing_pid"; then
+            echo "Error: Instance '$name' is already running (pid: $existing_pid)" >&2
+            return 1
+        fi
+        rm -f "$REGISTRY/$name"
+    fi
+
+    # Auto-assign port
+    if [[ -z "$port" ]]; then
+        port=$(_find_free_port)
+    elif lsof -i ":$port" &>/dev/null 2>&1; then
+        echo "Error: Port $port is already in use" >&2
+        return 1
+    fi
+
+    # Create instance profile from base (for identity sharing)
+    local profile="$INSTANCES_DIR/$name"
+    if [[ -d "$BASE_PROFILE/Default" ]] || [[ -d "$BASE_PROFILE/Local State" ]]; then
+        echo "Cloning base profile for shared identity..."
+        rsync -a --quiet "$BASE_PROFILE/" "$profile/" 2>/dev/null || cp -R "$BASE_PROFILE/" "$profile/"
+        # Remove lock files from copied profile
+        rm -f "$profile/SingletonLock" "$profile/SingletonCookie" "$profile/SingletonSocket" 2>/dev/null
+    else
+        mkdir -p "$profile"
+    fi
+
+    # Build Chrome launch arguments
+    local args=(
+        "--remote-debugging-port=$port"
+        "--user-data-dir=$profile"
+        "--no-first-run"
+        "--no-default-browser-check"
+        "--disable-background-timer-throttling"
+        "--disable-backgrounding-occluded-windows"
+        "--disable-renderer-backgrounding"
+        "--disable-hang-monitor"
+        "--disable-prompt-on-repost"
+        "--disable-sync"
+        "--disable-translate"
+        "--metrics-recording-only"
+        "--safebrowsing-disable-auto-update"
+        "--password-store=basic"
+        "--use-mock-keychain"
+        "--window-size=$window_size"
+    )
+
+    if [[ -n "$window_position" ]]; then
+        args+=("--window-position=$window_position")
+    fi
+
+    if $headless; then
+        args+=("--headless=new")
+    fi
+
+    if [[ -n "$url" ]]; then
+        args+=("$url")
+    fi
+
+    # Launch Chrome in background
+    "$CHROME_BIN" "${args[@]}" &>/dev/null &
+    local pid=$!
+
+    # Wait briefly for Chrome to start and verify
+    sleep 1
+    if ! _is_running "$pid"; then
+        echo "Error: Chrome failed to start" >&2
+        return 1
+    fi
+
+    # Register instance
+    echo "$pid $port $name $headless" > "$REGISTRY/$name"
+
+    local mode="headed"
+    $headless && mode="headless"
+
+    echo ""
+    echo "  Chrome debug instance started"
+    echo "  ─────────────────────────────"
+    echo "  Name:    $name"
+    echo "  Port:    $port"
+    echo "  PID:     $pid"
+    echo "  Mode:    $mode"
+    echo "  Profile: $profile"
+    echo ""
+    echo "  Connect with agent-browser:"
+    echo "    agent-browser --cdp $port snapshot -i"
+    echo "    agent-browser --cdp $port open <url>"
+    echo ""
+}
+
+cmd_list() {
+    _prune_registry
+
+    local has_instances=false
+
+    echo ""
+    echo "  Chrome Debug Instances"
+    echo "  ────────────────────────────────────────────────────"
+    printf "  %-15s %-8s %-10s %-10s %s\n" "NAME" "PORT" "PID" "MODE" "STATUS"
+    echo "  ────────────────────────────────────────────────────"
+
+    for f in "$REGISTRY"/*; do
+        [[ -f "$f" ]] || continue
+        has_instances=true
+        local pid port name is_headless
+        read -r pid port name is_headless < "$f"
+        local status="running"
+        local mode="headed"
+        [[ "$is_headless" == "true" ]] && mode="headless"
+        if ! _is_running "$pid"; then
+            status="stopped"
+        fi
+        printf "  %-15s %-8s %-10s %-10s %s\n" "$name" "$port" "$pid" "$mode" "$status"
+    done
+
+    if ! $has_instances; then
+        echo "  (no instances)"
+    fi
+    echo ""
+}
+
+cmd_stop() {
+    local target="${1:-}"
+
+    if [[ -z "$target" ]]; then
+        echo "Usage: chrome-debug stop <name|all>" >&2
+        return 1
+    fi
+
+    if [[ "$target" == "all" ]]; then
+        local stopped=0
+        for f in "$REGISTRY"/*; do
+            [[ -f "$f" ]] || continue
+            local pid name
+            pid=$(awk '{print $1}' "$f")
+            name=$(awk '{print $3}' "$f")
+            if _is_running "$pid"; then
+                kill "$pid" 2>/dev/null
+                echo "  Stopped $name (pid: $pid)"
+                stopped=$((stopped + 1))
+            fi
+            rm -f "$f"
+        done
+        [[ $stopped -eq 0 ]] && echo "  No running instances to stop"
+        return 0
+    fi
+
+    local regfile="$REGISTRY/$target"
+    if [[ ! -f "$regfile" ]]; then
+        echo "Error: No instance named '$target'" >&2
+        echo "Run 'chrome-debug list' to see instances" >&2
+        return 1
+    fi
+
+    local pid name
+    pid=$(awk '{print $1}' "$regfile")
+    name=$(awk '{print $3}' "$regfile")
+    if _is_running "$pid"; then
+        kill "$pid" 2>/dev/null
+        echo "  Stopped $name (pid: $pid)"
+    else
+        echo "  $name was already stopped"
+    fi
+    rm -f "$regfile"
+}
+
+cmd_save_profile() {
+    local source="${1:-}"
+
+    if [[ -z "$source" ]]; then
+        # Find the first running instance
+        for f in "$REGISTRY"/*; do
+            [[ -f "$f" ]] || continue
+            local pid name
+            pid=$(awk '{print $1}' "$f")
+            name=$(awk '{print $3}' "$f")
+            if _is_running "$pid"; then
+                source="$name"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$source" ]]; then
+        echo "Error: No running instance found. Specify an instance name or start one first." >&2
+        return 1
+    fi
+
+    local profile="$INSTANCES_DIR/$source"
+    if [[ ! -d "$profile" ]]; then
+        echo "Error: Profile directory not found for instance '$source'" >&2
+        return 1
+    fi
+
+    echo "  Saving profile from '$source' as base identity..."
+
+    # Stop Chrome briefly to ensure profile is flushed (optional - warn user)
+    local regfile="$REGISTRY/$source"
+    if [[ -f "$regfile" ]]; then
+        local pid
+        pid=$(awk '{print $1}' "$regfile")
+        if _is_running "$pid"; then
+            echo "  Note: For best results, close tabs with sensitive state before saving."
+        fi
+    fi
+
+    rsync -a --quiet --delete "$profile/" "$BASE_PROFILE/" 2>/dev/null || {
+        rm -rf "$BASE_PROFILE"
+        cp -R "$profile" "$BASE_PROFILE"
+    }
+    # Remove lock files from base profile
+    rm -f "$BASE_PROFILE/SingletonLock" "$BASE_PROFILE/SingletonCookie" "$BASE_PROFILE/SingletonSocket" 2>/dev/null
+
+    echo "  Base profile saved. New instances will share this identity."
+    echo ""
+}
+
+cmd_up() {
+    local roles_to_start=""
+
+    # Default: start all three roles
+    if [[ $# -eq 0 ]]; then
+        roles_to_start="$ALL_ROLES"
+    else
+        roles_to_start="$*"
+    fi
+
+    echo ""
+    echo "  Launching browser roles..."
+    echo "  ─────────────────────────────"
+
+    for role in $roles_to_start; do
+        local port
+        port=$(_role_port "$role")
+        if [[ -z "$port" ]]; then
+            echo "  Unknown role: $role (available: $ALL_ROLES)" >&2
+            continue
+        fi
+
+        # Skip if already running
+        if [[ -f "$REGISTRY/$role" ]]; then
+            local existing_pid
+            existing_pid=$(awk '{print $1}' "$REGISTRY/$role")
+            if _is_running "$existing_pid"; then
+                echo "  $role already running on port $port"
+                continue
+            fi
+            rm -f "$REGISTRY/$role"
+        fi
+
+        local url size
+        url=$(_role_url "$role")
+        size=$(_role_size "$role")
+
+        local start_args=(--name "$role" --port "$port" --size "$size")
+        [[ -n "$url" ]] && start_args+=("$url")
+
+        cmd_start "${start_args[@]}"
+    done
+
+    echo "  All roles ready. CDP ports:"
+    for role in $roles_to_start; do
+        local port
+        port=$(_role_port "$role")
+        [[ -n "$port" ]] && echo "    $role -> --cdp $port"
+    done
+    echo ""
+}
+
+cmd_roles() {
+    echo ""
+    echo "  Available Browser Roles"
+    echo "  ─────────────────────────────────────────────────────────────────────"
+    printf "  %-12s %-6s %-30s %s\n" "ROLE" "PORT" "URL" "DESCRIPTION"
+    echo "  ─────────────────────────────────────────────────────────────────────"
+    for role in $ALL_ROLES; do
+        local url port desc
+        url=$(_role_url "$role")
+        port=$(_role_port "$role")
+        desc=$(_role_desc "$role")
+        [[ -z "$url" ]] && url="(none)"
+        printf "  %-12s %-6s %-30s %s\n" "$role" "$port" "$url" "$desc"
+    done
+    echo ""
+}
+
+cmd_port_of() {
+    local role="${1:-}"
+    if [[ -z "$role" ]]; then
+        echo "Usage: chrome-debug port-of <role>" >&2
+        return 1
+    fi
+    local port
+    port=$(_role_port "$role")
+    if [[ -z "$port" ]]; then
+        echo "Unknown role: $role" >&2
+        return 1
+    fi
+    echo "$port"
+}
+
+cmd_clean() {
+    cmd_stop all 2>/dev/null || true
+    rm -rf "$INSTANCES_DIR"
+    rm -rf "$REGISTRY"
+    mkdir -p "$INSTANCES_DIR" "$REGISTRY"
+    echo "  Cleaned all instance data."
+    echo "  Base profile preserved at: $BASE_PROFILE"
+    echo "  To also reset identity: rm -rf $BASE_PROFILE"
+}
+
+cmd_ports() {
+    _prune_registry
+    for f in "$REGISTRY"/*; do
+        [[ -f "$f" ]] || continue
+        awk '{print $2}' "$f"
+    done
+}
+
+cmd_help() {
+    cat <<'HELP'
+chrome-debug - Manage Chrome debug instances for agent-browser
+
+Usage:
+  chrome-debug [start] [options] [URL]     Launch a new instance
+  chrome-debug up [roles...]               Launch preset roles (app, tools, whatsapp)
+  chrome-debug roles                       Show available roles
+  chrome-debug list                        List running instances
+  chrome-debug stop <name|all>             Stop instance(s)
+  chrome-debug save-profile [name]         Save profile as shared identity
+  chrome-debug port-of <role>              Get CDP port for a role
+  chrome-debug clean                       Remove all instance data
+  chrome-debug ports                       List CDP ports of running instances
+
+Start Options:
+  --name, -n NAME       Instance name (default: browser-N)
+  --port, -p PORT       CDP port (default: auto from 9222)
+  --headless, -H        Run headless (default: headed)
+  --size, -s WxH        Window size (default: 1280,900)
+  --position X,Y        Window position on screen
+
+Preset Roles:
+  app        (port 9222)  Localhost app testing
+  tools      (port 9223)  External tools config (HubSpot, Polar, ElevenLabs)
+  whatsapp   (port 9224)  WhatsApp Web for agent notifications
+  research   (port 9225)  Docs, MCPs, SDKs, API references
+
+Quick Start - Full Agent Workspace:
+  chrome-debug up                          # Launch all 3 roles
+  chrome-debug up app whatsapp             # Launch specific roles
+
+Identity Sharing Workflow:
+  1. chrome-debug start --name setup
+  2. Log into your accounts (app, WhatsApp QR scan, tools)
+  3. chrome-debug save-profile setup
+  4. All future 'up' launches will share that identity
+
+Connecting with agent-browser:
+  agent-browser --cdp 9222 open http://localhost:3000    # app
+  agent-browser --cdp 9223 open https://hubspot.com      # tools
+  agent-browser --cdp 9224 snapshot -i                   # whatsapp
+  agent-browser --cdp 9225 open https://docs.convex.dev  # research
+
+Environment Variables:
+  CHROME_DEBUG_HOME     Data directory (default: ~/.chrome-debug)
+  CHROME_DEBUG_BIN      Chrome binary path
+
+HELP
+}
+
+# ─── Main Dispatch ────────────────────────────────────────────────────────────
+case "${1:-}" in
+    start)       shift; cmd_start "$@";;
+    up)          shift; cmd_up "$@";;
+    roles)       cmd_roles;;
+    list|ls)     cmd_list;;
+    stop)        shift; cmd_stop "$@";;
+    save-profile|save) shift; cmd_save_profile "$@";;
+    port-of)     shift; cmd_port_of "$@";;
+    clean)       cmd_clean;;
+    ports)       cmd_ports;;
+    help|-h|--help) cmd_help;;
+    "")          cmd_help;;
+    -*)          cmd_start "$@";;     # Flags go to start
+    *)           cmd_start "$@";;     # URL or name goes to start
+esac
