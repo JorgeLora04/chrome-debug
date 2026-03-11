@@ -4,6 +4,11 @@ Launch and control multiple headed Chrome instances in parallel using sub-agents
 
 **All agent-browser and chrome-debug commands are auto-allowed — no confirmation prompts.**
 
+> **CRITICAL RULE — Automatic Login Detection:**
+> When ANY browser sub-agent detects a login/auth page after a page load, the main agent MUST immediately launch a WhatsApp notification sub-agent to alert the user — do NOT just report it in conversation text. The user may not be watching the terminal. Every sub-agent prompt includes a mandatory LOGIN CHECK step after each `snapshot -i`. See Pattern 6 for the full automatic flow.
+
+> **Command prefix rule:** NEVER prefix `agent-browser` or `chrome-debug` with `sleep &&` or other shell commands. Always call them as standalone commands so auto-allow rules match the `Bash(agent-browser` prefix correctly.
+
 ## Interactive Setup Wizard ("vamoaeto")
 
 When the user says **"vamoaeto"**, run this interactive setup before launching browsers. Use `AskUserQuestion` for each step.
@@ -48,6 +53,11 @@ For each selected browser:
 1. `chrome-debug start --name <role> --port <port>`
 2. `agent-browser --cdp <port> open <url>` (if a URL was chosen)
 3. `agent-browser --cdp <port> wait --load networkidle`
+
+**WhatsApp special case:** After opening `web.whatsapp.com`, always snapshot and check the state:
+- If chat list is visible → WhatsApp is linked, proceed
+- If QR code or "Link a device" screen → tell the user to scan the QR code in the WhatsApp browser window and wait for confirmation before proceeding
+- Do NOT assume WhatsApp is ready — always verify
 
 ### Step 4: Save Session Config
 
@@ -182,6 +192,10 @@ Task: Research [topic] and report findings.
 1. agent-browser --cdp 9225 open [docs URL or search URL]
 2. agent-browser --cdp 9225 wait --load networkidle
 3. agent-browser --cdp 9225 snapshot -i
+
+   *** LOGIN CHECK: If a login/sign-in page appears, report LOGIN_DETECTED
+   immediately — do not try to bypass it. ***
+
 4. Navigate through docs, click relevant sections
 5. agent-browser --cdp 9225 get text @REF  (extract key content)
 6. Screenshot key findings: agent-browser --cdp 9225 screenshot /tmp/research-[topic].png
@@ -206,6 +220,11 @@ Task: Test [feature] at http://localhost:3000.
 1. agent-browser --cdp 9222 open http://localhost:3000/[path]
 2. agent-browser --cdp 9222 wait --load networkidle
 3. agent-browser --cdp 9222 snapshot -i
+
+   *** LOGIN CHECK: If you see a login/sign-in page, STOP and immediately
+   report LOGIN_DETECTED to the main agent so it can notify the user via WhatsApp.
+   Do NOT proceed past a login wall without the user's action. ***
+
 4. [interact with feature]
 5. agent-browser --cdp 9222 screenshot /tmp/app-test.png
 6. Report what you observed
@@ -221,6 +240,11 @@ Task: Configure [setting] in [tool name].
 1. agent-browser --cdp 9223 open [tool URL]
 2. agent-browser --cdp 9223 wait --load networkidle
 3. agent-browser --cdp 9223 snapshot -i
+
+   *** LOGIN CHECK: If you see a login/sign-in/OAuth page, STOP and immediately
+   report LOGIN_DETECTED to the main agent. Check if OAuth is available first —
+   if yes, snapshot the picker and list accounts. If no, notify user via WhatsApp. ***
+
 4. [navigate and configure]
 5. agent-browser --cdp 9223 screenshot /tmp/tools-config.png
 6. Report the result
@@ -277,27 +301,62 @@ You encountered a login page with OAuth/Google Sign-In.
 - Each service gets its own limited token with only the permissions it requests
 - You can revoke any OAuth token from Google Account → Security → Third-party apps
 
-### Pattern 6: Credential Request via WhatsApp + OAuth Decision
+### Pattern 6: Automatic Login Detection → WhatsApp Alert (MANDATORY)
 
-The full compound workflow when the agent hits a login wall:
+**This pattern is MANDATORY — not optional.** When any browser sub-agent detects a login page, the main agent must immediately launch a WhatsApp notification sub-agent. Do NOT just report it in conversation text — the user is likely not watching the terminal.
+
+**Full automatic flow:**
 
 ```
-Main Agent:
-  1. Sub-agent on tools browser hits login page
-  2. Sub-agent checks: is there an OAuth option?
+Sub-Agent (any browser) detects login page:
+  → Immediately reports: "LOGIN_DETECTED at [URL]. OAuth available: yes/no."
+
+Main Agent receives LOGIN_DETECTED:
+  1. Immediately launch WhatsApp sub-agent in parallel
 
   If OAuth available:
-    3a. Sub-agent snapshots the OAuth picker
-    3b. Reports available Google accounts to main agent
-    3c. Main agent asks user which account (AskUserQuestion or WhatsApp)
-    3d. Sub-agent clicks the selected account → done
+    → WhatsApp message: "I hit a login page at [URL]. I see these Google accounts:
+       - jorge.lora@airobotix.net
+       - jorge@personal.com
+       Which should I use?"
+    → Wait for reply (poll WhatsApp every ~10s)
+    → Sub-agent clicks selected account → OAuth completes
 
   If no OAuth (username/password only):
-    3a. Launch WhatsApp sub-agent: "Send message to CHAT_NAME:
-         I need login credentials for [service].
-         I'm on the login page at [URL]."
-    3b. Poll WhatsApp for reply (snapshot chat periodically)
-    3c. When credentials arrive, fill them in on the tools browser
+    → WhatsApp message: "I need login credentials for [service name].
+       I'm blocked at: [URL]
+       Please send username and password."
+    → Poll WhatsApp for reply
+    → When credentials arrive, fill them in the blocked browser
+
+  If login page on app browser (localhost):
+    → WhatsApp message: "The app at [URL] is showing a login page.
+       Are you logged in? Do you want me to log in as a test user?"
+    → Wait for instructions before proceeding
+```
+
+**WhatsApp sub-agent prompt for login alert:**
+```
+You control WhatsApp Web via agent-browser --cdp 9224.
+Task: Send an urgent login-blocked notification to "CHAT_NAME".
+
+1. agent-browser --cdp 9224 snapshot -i
+2. Find the search box and type "CHAT_NAME"
+3. agent-browser --cdp 9224 wait 1000
+4. agent-browser --cdp 9224 snapshot -i
+5. Click the matching chat
+6. agent-browser --cdp 9224 snapshot -i
+7. Fill the message input with: "🔐 LOGIN REQUIRED\n[SERVICE] is asking me to log in.\nURL: [URL]\n[OAUTH/CREDENTIALS instructions]\nPlease respond here."
+8. agent-browser --cdp 9224 press Enter
+9. Report: message sent successfully
+```
+
+**Polling for user reply:**
+```bash
+# Every ~10 seconds while waiting for credentials:
+agent-browser --cdp 9224 snapshot -c
+# Look for new messages (after the agent's last message timestamp)
+# Parse incoming message text for credentials or account selection
 ```
 
 ### Pattern 7: Parallel Research + Implementation
@@ -313,11 +372,40 @@ Sub-Agent A (research, --cdp 9225):
 Sub-Agent B (app, --cdp 9222):
   - Test the current implementation at localhost
   - Report any errors or UI issues
+  - *** LOGIN CHECK after every snapshot — alert main agent immediately if login page ***
 
 Main Agent:
   - Uses research findings to write/fix code
   - Uses app test results to verify changes
 ```
+
+### Pattern 8: WhatsApp Reply Polling (Waiting for User Input)
+
+When the agent sends a WhatsApp message and needs the user's response (credentials, decision, confirmation):
+
+```bash
+# Send the message first (see Pattern 1)
+# Then poll every 10 seconds:
+
+agent-browser --cdp 9224 snapshot -c
+# Look for messages AFTER the timestamp of your last sent message
+# New incoming text = user's reply
+
+# If no reply yet, wait and retry:
+agent-browser --cdp 9224 wait 10000
+agent-browser --cdp 9224 snapshot -c
+```
+
+**Parsing the reply:**
+- Use `snapshot -c` (compact mode) to get text-only output — easier to parse than `-i` interactive mode
+- Look for the most recent message bubble that isn't from "You" (the agent)
+- The reply text is the user's response
+
+**After getting the reply:**
+- Credentials → fill them in the blocked browser immediately
+- OAuth account selection → click the selected account in the picker
+- Approval/denial → proceed or abort the action accordingly
+- If unclear → send a follow-up WhatsApp message asking for clarification
 
 ## WhatsApp Chat Targeting
 
@@ -373,6 +461,68 @@ chrome-debug clean
 chrome-debug start --name app-verify     # Auto-assigns next free port
 chrome-debug list                        # See assigned port
 ```
+
+## Lessons from Real Sessions
+
+Hard-won learnings from actual use — things that weren't obvious until they happened.
+
+### Command Prefixing Breaks Auto-Allow
+
+Auto-allow rules match on the exact start of the bash command string. If you write:
+
+```bash
+sleep 2 && agent-browser --cdp 9224 snapshot -i  # BREAKS auto-allow
+```
+
+The rule matches `Bash(agent-browser` but the actual command starts with `sleep`. Always split into separate calls:
+
+```bash
+agent-browser --cdp 9224 wait 2000   # built-in wait, no prefix needed
+agent-browser --cdp 9224 snapshot -i
+```
+
+### WhatsApp Must Be Verified, Not Assumed
+
+After opening `web.whatsapp.com`, always snapshot before doing anything. WhatsApp Web may show:
+- **Chat list** → linked and ready ✓
+- **QR code / "Link a device"** → not linked, user must scan
+- **"Phone not connected"** → phone is offline, user must check it
+- **Loading spinner** → wait a few more seconds then re-snapshot
+
+Never skip the verification step — a failed WhatsApp notification is worse than no notification.
+
+### `snapshot -i` vs `snapshot -c`
+
+- `-i` (interactive): Returns ref numbers (`@e1`, `@e2`) for clicking — use for interaction
+- `-c` (compact): Returns text-only content — use for reading/parsing (replies, page text extraction)
+
+When polling WhatsApp for a reply, use `-c` — easier to parse new message text without noise.
+
+### WhatsApp Search Box Behavior
+
+The search box in WhatsApp Web can be finicky. If typing doesn't filter results:
+1. Click the search icon first (not the input directly)
+2. Wait 500ms after clicking before filling
+3. After filling, wait 1000ms before reading results — the filter is async
+
+### Sub-Agent Snapshot After Navigation
+
+Always wait for `networkidle` after `open` before taking a snapshot:
+
+```bash
+agent-browser --cdp 9222 open http://localhost:3000/dashboard
+agent-browser --cdp 9222 wait --load networkidle
+agent-browser --cdp 9222 snapshot -i
+# Now safe to read the page state
+```
+
+Skipping the wait often produces a snapshot of the loading state, not the final page.
+
+### Parallel Sub-Agents — Port Isolation Is Critical
+
+Each sub-agent MUST use only its assigned `--cdp <port>`. If two sub-agents share the same port, their commands will interfere with each other's browser state. One agent's `open` will change the page the other agent is trying to interact with.
+
+Rule: one port per concurrent sub-agent, always.
 
 ## Troubleshooting
 
