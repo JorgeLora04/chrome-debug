@@ -16,7 +16,10 @@ case "$(uname -s)" in
     *)                     OS_TYPE="linux";;
 esac
 
+REPO_GIT_URL="${CHROME_DEBUG_GIT_URL:-https://github.com/JorgeLora04/chrome-debug.git}"
 REPO_URL="${CHROME_DEBUG_REPO_URL:-https://raw.githubusercontent.com/JorgeLora04/chrome-debug/main}"
+VAMOAETO_DIR="$HOME/.vamoaeto"
+LOCAL_REPO="$VAMOAETO_DIR/repo"
 BIN_DIR="$HOME/.local/bin"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
@@ -30,14 +33,37 @@ echo "  ──────────────────────"
 echo "  Platform: $OS_TYPE"
 echo ""
 
-# ─── 1. Install the script ───────────────────────────────────────────────────
+# ─── 1. Clone or update the repo ─────────────────────────────────────────────
+mkdir -p "$VAMOAETO_DIR"
+
+if [[ -d "$LOCAL_REPO/.git" ]]; then
+    # Repo already cloned — pull latest
+    echo "  [..] Updating existing repo..."
+    git -C "$LOCAL_REPO" pull --rebase origin main 2>/dev/null || true
+    echo "  [ok] Updated repo at $LOCAL_REPO"
+else
+    # Fresh clone
+    echo "  [..] Cloning vamoaeto repo..."
+    if command -v git &>/dev/null; then
+        git clone "$REPO_GIT_URL" "$LOCAL_REPO" 2>/dev/null
+        echo "  [ok] Cloned repo to $LOCAL_REPO"
+    else
+        echo "  [!!] git not found — installing without repo sync (vamoaeto update won't work)"
+        echo "       Install git and re-run the installer to enable sync."
+    fi
+fi
+
+# ─── 2. Install the script ───────────────────────────────────────────────────
 mkdir -p "$BIN_DIR"
 
 if [[ -f "chrome-debug" ]]; then
-    # Local install (cloned repo)
+    # Running from a cloned repo directly
     cp chrome-debug "$BIN_DIR/chrome-debug"
+elif [[ -f "$LOCAL_REPO/chrome-debug" ]]; then
+    # Install from the local clone
+    cp "$LOCAL_REPO/chrome-debug" "$BIN_DIR/chrome-debug"
 else
-    # Remote install (curl pipe)
+    # Fallback: curl download
     curl -fsSL "$REPO_URL/chrome-debug" -o "$BIN_DIR/chrome-debug"
 fi
 
@@ -94,12 +120,36 @@ fi
 if [[ "$SKIP_CLAUDE" != "1" ]]; then
     mkdir -p "$CLAUDE_COMMANDS_DIR"
 
-    if [[ -f "multi-browser.md" ]]; then
-        cp multi-browser.md "$CLAUDE_COMMANDS_DIR/multi-browser.md"
-    else
-        curl -fsSL "$REPO_URL/multi-browser.md" -o "$CLAUDE_COMMANDS_DIR/multi-browser.md"
+    # Install main command: /vamoaeto (unified toolkit)
+    # Priority: current dir (dev) > local repo clone > curl download
+    install_file() {
+        local filename="$1"
+        local dest="$2"
+        if [[ -f "$filename" ]]; then
+            cp "$filename" "$dest"
+        elif [[ -f "$LOCAL_REPO/$filename" ]]; then
+            cp "$LOCAL_REPO/$filename" "$dest"
+        else
+            curl -fsSL "$REPO_URL/$filename" -o "$dest"
+        fi
+    }
+
+    install_file "vamoaeto.md" "$CLAUDE_COMMANDS_DIR/vamoaeto.md"
+    echo "  [ok] Installed /vamoaeto command (AI project toolkit)"
+
+    # Install knowledge base references (loadable via /command for deep-dives)
+    for kb_file in multi-browser.md design-patterns.md saas-patterns.md integration-patterns.md; do
+        install_file "$kb_file" "$CLAUDE_COMMANDS_DIR/$kb_file"
+    done
+    echo "  [ok] Installed knowledge base (multi-browser, design-patterns, saas-patterns, integration-patterns)"
+
+    # Install any project-specific knowledge from the repo's .vamoaeto/knowledge/
+    if [[ -d "$LOCAL_REPO/.vamoaeto/knowledge" ]]; then
+        for kf in "$LOCAL_REPO/.vamoaeto/knowledge/"*.md; do
+            [[ -f "$kf" ]] && cp "$kf" "$CLAUDE_COMMANDS_DIR/$(basename "$kf")"
+        done
+        echo "  [ok] Installed shared project knowledge from repo"
     fi
-    echo "  [ok] Installed /multi-browser command to $CLAUDE_COMMANDS_DIR/"
 
     # ─── 5. Add auto-allow permissions to Claude Code settings ────────────────
     PERMISSIONS_TO_ADD=(
@@ -214,6 +264,15 @@ echo "    chrome-debug up                  # Launch all browser roles"
 echo "    chrome-debug roles               # See available roles"
 echo "    chrome-debug help                # Full usage"
 echo ""
+echo "  In Claude Code:"
+echo "    /vamoaeto                        # Interactive setup wizard"
+echo "    /vamoaeto update                 # Scan project & sync knowledge with team"
+echo ""
+if [[ -d "$LOCAL_REPO/.git" ]]; then
+    echo "  Repo synced to: $LOCAL_REPO"
+    echo "  Team knowledge syncs automatically via 'vamoaeto update'"
+    echo ""
+fi
 if [[ -n "$SHELL_RC" ]]; then
     echo "  Reload your shell:  source $SHELL_RC"
     echo ""
