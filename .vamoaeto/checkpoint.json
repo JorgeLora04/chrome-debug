@@ -1,0 +1,110 @@
+{
+  "project_name": "agentio",
+  "scan_dir": "/Users/jorgelora/Desktop/agentio",
+  "last_update": "2026-04-14T19:12:46.732Z",
+  "updated_by": "JorgeLora",
+  "updates": [
+    {
+      "date": "2026-04-14T19:12:46.732Z",
+      "by": "JorgeLora",
+      "files_scanned": 31,
+      "files_changed": 31,
+      "summary": "Initial scan: agentio tech stack, 21 solution docs, 3 plan docs, hard-rule feedback. Knowledge file written to .vamoaeto/knowledge/agentio.md"
+    }
+  ],
+  "files": {
+    "CLAUDE.md": {
+      "hash": "26cf7ea7464d7305106aa1d783d6524cebcc03a6"
+    },
+    "package.json": {
+      "hash": "6d07f4598323f9d0c8fdb793eddba4d475006b17"
+    },
+    "tsconfig.json": {
+      "hash": "6261c58a1fb3a7bd1626496affe18873387281b3"
+    },
+    "next.config.ts": {
+      "hash": "e2bc6edec8431f24842b485aeac2f995ac46dcd7"
+    },
+    "convex/schema.ts": {
+      "hash": "f556c00153601dacba77360b8beac57788636054"
+    },
+    "docs/solutions/integration-issues/hubspot-rolling-daily-batch-trigger.md": {
+      "hash": "080325b7f109b80cef913bd4832c2f914e75304c"
+    },
+    "docs/solutions/integration-issues/batch-completion-pipeline-fixes.md": {
+      "hash": "fb2b6ee8b6cb7745b49020fa20dfdb3dbaf2cae5"
+    },
+    "docs/solutions/integration-issues/hubspot-booking-webhook-call-race-condition.md": {
+      "hash": "7c52b453b3cea63632fb36ee22ffed9ff9fa1a66"
+    },
+    "docs/solutions/integration-issues/vercel-ai-sdk-v6-gateway-convex-integration.md": {
+      "hash": "2b0bad180b23bc1504ee64ff8c9363ea2605f82c"
+    },
+    "docs/solutions/integration-issues/batch-calling-flow.md": {
+      "hash": "3827a62743ccc04eccba027fc2d736b3468e08c3"
+    },
+    "docs/solutions/integration-issues/elevenlabs-webhook-tool-configuration.md": {
+      "hash": "ec302ff134cc570a5bc7063f11bd2f883ca5c394"
+    },
+    "docs/solutions/integration-issues/widget-conversation-sync.md": {
+      "hash": "0abf925d147703173de0405bd42597612076ebc8"
+    },
+    "docs/solutions/integration-issues/whatsapp-meta-graph-api-waba-lookup-and-convex-crypto.md": {
+      "hash": "b8d20440637ba849cad26572a5ad1d5bd11f6865"
+    },
+    "docs/solutions/integration-issues/hubspot-booking-integration.md": {
+      "hash": "e5c35e2e5b5745edc003934ff83caf743874017c"
+    },
+    "docs/solutions/integration-issues/polar-billing-sync-and-pricing-config.md": {
+      "hash": "1992c8f2386463ea5ca709205b21a64101f938cb"
+    },
+    "docs/solutions/integration-issues/elevenlabs-prompt-consistency.md": {
+      "hash": "28a32d3f161b44eac506e433131738f33175396f"
+    },
+    "docs/solutions/integration-issues/hubspot-meeting-availability-404-wrong-endpoint.md": {
+      "hash": "d958d3e3a46b91f90b5ececec8e7fc9c4fa26ad8"
+    },
+    "docs/solutions/integration-issues/whatsapp-duplicate-call-dedup-occ-race.md": {
+      "hash": "b7f2aaf6b65c8167d5c52f8b162ff582a32ed874"
+    },
+    "docs/solutions/integration-issues/subscription-pricing-update.md": {
+      "hash": "5c57c19824c623135a612e0620ceec8f1a16044f"
+    },
+    "docs/solutions/performance-issues/sentiment-module-optimization.md": {
+      "hash": "e1802bbde4731d2bea902886f24e4f9f9d3b68ad"
+    },
+    "docs/solutions/performance-issues/owner-page-component-extraction-and-refactoring.md": {
+      "hash": "7c2fd42b30906a075d762be049b44464179881ad"
+    },
+    "docs/solutions/ui-bugs/owner-mode-dashboard-redesign-theme-management.md": {
+      "hash": "d95aff7cde2a82af913d052bfc82bb96abb42f3e"
+    },
+    "docs/solutions/ui-bugs/owner-config-panel-form-and-flow-fixes.md": {
+      "hash": "c6a903958c7dd9dde935a6c66219f8d40a9570e1"
+    },
+    "docs/solutions/security-issues/multi-tenancy-data-isolation.md": {
+      "hash": "5d4c8b045fe03aa4d03a85161877ec24a9e4bff8"
+    },
+    "docs/solutions/build-errors/typescript-any-type-cleanup.md": {
+      "hash": "943262d97591bfe310ad4643ba6e2055f4f38dbc"
+    },
+    "docs/solutions/runtime-errors/convex-validation-extra-fields.md": {
+      "hash": "7a85bd9e4cd68cd7ec33961267bbf1782565f3dd"
+    },
+    "docs/plans/hubspot-batch-trigger.md": {
+      "hash": "17c12b860060891d91f122ae46b8a1c3c87edbc4"
+    },
+    "docs/plans/hubspot-contact-lookup-tool.md": {
+      "hash": "ff2222703f0f2f90ae2bf250964bb2a9dde42b68"
+    },
+    "docs/plans/2026-03-10-feat-agents-redesign-ai-prompt-generator-plan.md": {
+      "hash": "0c6246ddf0a68236f60598834c36c04234b79437"
+    },
+    "MEMORY.md": {
+      "hash": "169535a59393629e529b91bd24393a227b65a266"
+    },
+    "feedback_ui_preview.md": {
+      "hash": "61d332a8f6f5e0ba1b63cf9f538eeef7108691f5"
+    }
+  }
+}
