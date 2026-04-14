@@ -370,6 +370,26 @@ On subsequent runs:
 6. **Always git push after** — share your updates with the team
 7. Show diff summary: "Pulled 2 commits. Scanned 3 new files, 2 changed. Updated architecture and integration sections. Pushed to origin."
 
+### Silent Background Auto-Sync (no manual pull needed)
+
+A `SessionStart` hook installed by `install.sh` runs `vamoaeto-sync` every time
+you start a Claude Code session. That script:
+
+1. `git fetch` with a 3-second low-speed abort (offline-safe — never blocks startup)
+2. If the remote has new commits, `git pull --rebase --autostash --quiet`
+3. Refreshes `~/.claude/commands/` from `.vamoaeto/knowledge/*.md`
+4. Always exits 0 — failures are silent, never break the session
+
+This means: a teammate runs `vamoaeto update` and pushes new knowledge → next
+time you open Claude Code anywhere, you have it. Zero manual `git pull` needed,
+exactly like a plugin auto-update.
+
+Manual invocation for debugging:
+
+```bash
+vamoaeto-sync --verbose   # prints fetch / pull / refresh status
+```
+
 ### Conflict Resolution
 
 If `git pull` encounters conflicts in `.vamoaeto/` files:

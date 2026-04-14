@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# vamoaeto-sync — silently sync vamoaeto knowledge from chrome-debug repo
+#
+# Runs on Claude Code SessionStart via the hook installed by install.sh.
+# Always exits 0 — failures are silent, never block the session.
+# Designed to complete in <2 seconds (3s git timeout) so session startup is unaffected.
+#
+# Manual invocation:  vamoaeto-sync           (silent, exit code only)
+#                     vamoaeto-sync --verbose (prints what it did)
+
+VERBOSE=0
+[[ "${1:-}" == "--verbose" || "${1:-}" == "-v" ]] && VERBOSE=1
+log() { [[ $VERBOSE -eq 1 ]] && echo "[vamoaeto-sync] $*" >&2; }
+
+REPO="$HOME/.vamoaeto/repo"
+[[ -d "$REPO/.git" ]] || { log "no repo at $REPO — nothing to sync"; exit 0; }
+
+cd "$REPO" || exit 0
+
+# Quick fetch — abort if transfer drops below 1KB/s for 3s (offline shouldn't block Claude startup).
+# Uses git's built-in low-speed abort instead of `timeout` (which isn't on macOS by default).
+if ! git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=3 fetch --quiet origin main 2>/dev/null; then
+  log "fetch failed or timed out — skipping"
+  exit 0
+fi
+
+LOCAL=$(git rev-parse @ 2>/dev/null) || exit 0
+REMOTE=$(git rev-parse @{u} 2>/dev/null) || exit 0
+
+if [[ "$LOCAL" == "$REMOTE" ]]; then
+  log "already up to date ($LOCAL)"
+  exit 0
+fi
+
+# Pull. Skip silently on conflicts (manual `vamoaeto update` will resolve them).
+if ! git pull --rebase --quiet --autostash 2>/dev/null; then
+  log "pull failed (likely local changes or conflict) — skipping"
+  exit 0
+fi
+
+# Refresh installed knowledge files
+mkdir -p "$HOME/.claude/commands" 2>/dev/null
+COPIED=0
+if [[ -d ".vamoaeto/knowledge" ]]; then
+  for f in .vamoaeto/knowledge/*.md; do
+    [[ -f "$f" ]] || continue
+    cp "$f" "$HOME/.claude/commands/" 2>/dev/null && COPIED=$((COPIED + 1))
+  done
+fi
+
+log "synced ${LOCAL:0:7} → ${REMOTE:0:7}, refreshed $COPIED knowledge file(s)"
+exit 0

@@ -70,6 +70,19 @@ fi
 chmod +x "$BIN_DIR/chrome-debug"
 echo "  [ok] Installed chrome-debug to $BIN_DIR/chrome-debug"
 
+# ─── 2b. Install vamoaeto-sync (silent background knowledge sync) ────────────
+if [[ -f "vamoaeto-sync" ]]; then
+    cp vamoaeto-sync "$BIN_DIR/vamoaeto-sync"
+elif [[ -f "$LOCAL_REPO/vamoaeto-sync" ]]; then
+    cp "$LOCAL_REPO/vamoaeto-sync" "$BIN_DIR/vamoaeto-sync"
+else
+    curl -fsSL "$REPO_URL/vamoaeto-sync" -o "$BIN_DIR/vamoaeto-sync" 2>/dev/null || true
+fi
+if [[ -f "$BIN_DIR/vamoaeto-sync" ]]; then
+    chmod +x "$BIN_DIR/vamoaeto-sync"
+    echo "  [ok] Installed vamoaeto-sync to $BIN_DIR/vamoaeto-sync"
+fi
+
 # ─── 2. Ensure ~/.local/bin is in PATH ────────────────────────────────────────
 SHELL_RC=""
 if [[ -f "$HOME/.zshrc" ]]; then
@@ -200,6 +213,23 @@ if [[ "$SKIP_CLAUDE" != "1" ]]; then
 }
 SETTINGS
         echo "  [ok] Created $CLAUDE_SETTINGS with auto-allow permissions"
+    fi
+
+    # ─── 5b. Register SessionStart hook for silent knowledge auto-sync ───────
+    # Every time you start a Claude Code session, vamoaeto-sync silently runs
+    # `git pull` on the chrome-debug repo and refreshes ~/.claude/commands/.
+    # No manual pull needed — like a plugin auto-update.
+    if command -v jq &>/dev/null; then
+        if ! jq -e '.hooks.SessionStart[]?.hooks[]? | select(.command | test("vamoaeto-sync"))' "$CLAUDE_SETTINGS" &>/dev/null; then
+            tmp=$(mktemp)
+            jq '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "*", hooks: [{type: "command", command: "$HOME/.local/bin/vamoaeto-sync", timeout: 5000}]}])' "$CLAUDE_SETTINGS" > "$tmp" && mv "$tmp" "$CLAUDE_SETTINGS"
+            echo "  [ok] Registered SessionStart hook — knowledge auto-syncs each Claude session"
+        else
+            echo "  [ok] SessionStart hook already registered"
+        fi
+    else
+        echo "  [!!] jq not found — add this hook manually to $CLAUDE_SETTINGS:"
+        echo '        "hooks": { "SessionStart": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "$HOME/.local/bin/vamoaeto-sync", "timeout": 5000 }] }] }'
     fi
 fi
 
